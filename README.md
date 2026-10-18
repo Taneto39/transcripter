@@ -27,13 +27,13 @@ Put recordings in `data/`. Working files go there too (`chunks/`, `transcripts/`
 
 ```bash
 conda activate transcripter
-python pipeline.py upload [file]        # split into 20-minute PCM WAV chunks (ffmpeg) and upload to GCS
+python pipeline.py upload [file]        # split into exact 20-minute 16 kHz mono WAV chunks and upload to GCS
 python pipeline.py send [recording]     # submit BatchRecognize jobs (max 5 files per request)
 python pipeline.py status [recording]   # check every job of a recording (from operations.log); also takes an operation id
 python pipeline.py download [recording] # fetch transcript JSON and write output/{recording}_transcript.csv
 ```
 
-A *recording* is the file name with its extension folded in (`meeting.m4a` → `meeting_m4a`), so two files that differ only by extension can be transcribed and compared side by side. `send`, `status` and `download` take the full name or any unique part of it (such as a date), and list the candidates when it matches more than one. `upload` skips chunks that are already in the bucket, so an interrupted upload can simply be rerun.
+A *recording* is the file name with its extension folded in (`meeting.m4a` → `meeting_m4a`), so two files that differ only by extension can be transcribed and compared side by side. `send`, `status` and `download` take the full name or any unique part of it (such as a date), and list the candidates when it matches more than one. `upload` skips chunks that are already in the bucket, so an interrupted upload can simply be rerun. Chunks are cut by sample count, because `BatchRecognize` rejects files even a fraction of a second over 20 minutes. If a recording is sent again, `download` keeps only the newest transcript of each chunk.
 
 Each step can also be run as its own script (`batch_upload.py`, `batch_send.py`, `operation_progress.py`, `batch_download.py`). Arguments are optional; missing ones are prompted for.
 
@@ -59,10 +59,12 @@ conda activate transcripter
 python transcripter.py <file or glob>
 ```
 
-Writes `output/{recording}_transcript_local.csv` with `start`, `end`, `speaker`, `text`. Uses [typhoon-ai/typhoon-whisper-large-v3](https://huggingface.co/typhoon-ai/typhoon-whisper-large-v3) converted to CTranslate2:
+Writes `output/{recording}_transcript_local.csv` with `start`, `end`, `speaker`, `text`, one row per speaker turn. The audio is diarized first (or an existing `output/{recording}_diarization.csv` is reused), then each turn (same-speaker turns merged up to 28 s) is transcribed on its own in one batched pass; times and speakers come from the diarization. Uses [typhoon-ai/typhoon-whisper-large-v3](https://huggingface.co/typhoon-ai/typhoon-whisper-large-v3) converted to CTranslate2:
 
 ```bash
 ct2-transformers-converter --model typhoon-ai/typhoon-whisper-large-v3 --output_dir models/typhoon-whisper-large-v3-ct2 --quantization float16
 ```
 
 The converter doesn't copy `preprocessor_config.json`. Add one with `"feature_size": 128` (otherwise copied from `openai/whisper-large-v3`) or transcription fails with a feature-shape error. Speakers use the same HuggingFace token as `diarize.py`, and the run also writes `output/{recording}_diarization.csv`.
+
+Transcribing per turn matters for this model: left to cut its own 30-second windows it returns no usable timestamps and tends to loop on a repeated phrase. Expect clear speech to come out close to `chirp_3`, while names, domain terms and very short turns are less reliable, and non-speech audio (hold music) that the diarization labels as a speaker can come back as invented text.
