@@ -1,0 +1,24 @@
+# One env for every script:
+#   conda create -n transcripter python=3.12
+#   conda activate transcripter
+#   conda install -c conda-forge "ffmpeg>=4,<9"   # shared FFmpeg DLLs for torchcodec (pyannote decoding)
+#   pip install -r requirements.txt
+# tkinter (file dialog) ships with the standard Python installer.
+--extra-index-url https://download.pytorch.org/whl/cu128
+
+# Batch pipeline (Google Cloud Speech-to-Text v2)
+google-cloud-speech>=2.27
+google-cloud-storage>=2.18
+google-auth>=2.30
+
+# Speaker diarization (diarize.py) and local transcription (transcripter.py), CUDA 12.8
+# Pinned: unpinned, pip prefers a newer CPU-only torch from PyPI over the latest +cu128 build.
+torch==2.11.0
+torchaudio==2.11.0
+torchcodec==0.14.0
+pyannote.audio==4.0.4
+faster-whisper
+tqdm
+
+# Only for converting the Whisper model to CTranslate2 (ct2-transformers-converter)
+transformers

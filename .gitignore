@@ -1,0 +1,21 @@
+# Recordings, chunks, transcript JSON, logs
+data/
+# Transcript and diarization CSVs
+output/
+
+# Local model weights
+models/
+
+# Media dropped outside data/ by mistake
+*.wav
+*.mp3
+*.m4a
+*.aac
+*.mp4
+*.mkv
+*.csv
+*.log
+
+.env
+__pycache__/
+*.pyc
