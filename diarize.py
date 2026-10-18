@@ -34,7 +34,12 @@ def load_pipeline():
     return pipeline.to(torch.device("cuda"))
 
 
-def diarize(pipeline, record):
+def load_audio(record):
+    """Decode a file once to 16 kHz mono; returns torchcodec AudioSamples (.data is a (1, n) tensor)."""
+    return AudioDecoder(record, sample_rate=16000, num_channels=1).get_all_samples()
+
+
+def diarize(pipeline, record, samples=None):
     """Run diarization on one file; returns [(start, end, speaker), ...] sorted by start."""
     print("Diarizing...")
     current = {"step": None, "bar": None}
@@ -51,7 +56,8 @@ def diarize(pipeline, record):
         current["bar"].refresh()
 
     # Decode once: given a path, pyannote re-decodes the file for every embedding window (~40% slower).
-    samples = AudioDecoder(record, sample_rate=16000, num_channels=1).get_all_samples()
+    if samples is None:
+        samples = load_audio(record)
     try:
         output = pipeline({"waveform": samples.data, "sample_rate": samples.sample_rate}, hook=hook)
     finally:

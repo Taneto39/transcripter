@@ -1,5 +1,6 @@
 import argparse
 import json
+from datetime import datetime, timedelta
 
 from google.api_core.client_options import ClientOptions
 from google.api_core.exceptions import NotFound
@@ -82,10 +83,21 @@ def check_status(operation_name):
     return operation
 
 
+SEND_RUN_GAP = timedelta(minutes=5)
+
+
+def latest_run(ops):
+    """The operations of the most recent send: one send logs its operations seconds apart."""
+    start = len(ops) - 1
+    while start > 0 and (datetime.fromisoformat(ops[start][0]) - datetime.fromisoformat(ops[start - 1][0])) < SEND_RUN_GAP:
+        start -= 1
+    return ops[start:], start
+
+
 def check_recording(recording, entries):
-    """One line per logged operation of the recording, then what to do next."""
-    ops = [e for e in entries if e[1] == recording]
-    print(f"{recording}: {len(ops)} operation(s)")
+    """One line per operation of the recording's latest send, then what to do next."""
+    ops, hidden = latest_run([e for e in entries if e[1] == recording])
+    print(f"{recording}: {len(ops)} operation(s)" + (f" ({hidden} from earlier sends not shown)" if hidden else ""))
     states = []
     for timestamp, _, chunk_count, name in ops:
         try:

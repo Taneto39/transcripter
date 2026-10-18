@@ -33,11 +33,19 @@ def download(query=None):
     recording = choose_recording(recordings_in([b.name for b in blobs], GCS_TRANSCRIPTS_PREFIX), query)
 
     chunk_prefix = f"{GCS_TRANSCRIPTS_PREFIX}{recording}{CHUNK_MARKER}"
-    targets = [b for b in blobs if b.name.startswith(chunk_prefix)]
+    # A chunk sent more than once (e.g. resent after a failure) has one JSON per run; keep the newest.
+    latest = {}
+    for b in blobs:
+        if b.name.startswith(chunk_prefix):
+            chunk = b.name[len(chunk_prefix):].split("_")[0]
+            if chunk not in latest or b.updated > latest[chunk].updated:
+                latest[chunk] = b
+    targets = sorted(latest.values(), key=lambda b: b.name)
+    skipped = sum(b.name.startswith(chunk_prefix) for b in blobs) - len(targets)
 
-    print(f"{recording}: {len(targets)} files, downloading...")
+    print(f"{recording}: {len(targets)} files, downloading..." + (f" ({skipped} older duplicates skipped)" if skipped else ""))
     paths = []
-    for blob in sorted(targets, key=lambda b: b.name):
+    for blob in targets:
         filename = os.path.basename(blob.name)
         dest = os.path.join(DOWNLOAD_DIR, filename)
         blob.download_to_filename(dest)

@@ -1,8 +1,8 @@
 import argparse
 import subprocess
 import os
-import glob
 import tkinter as tk
+import wave
 from tkinter import filedialog
 
 from google.cloud import storage
@@ -10,6 +10,8 @@ from google.oauth2 import service_account
 
 from config import BUCKET, CHUNK_DIR, CHUNK_SECONDS, DATA_DIR, GCS_AUDIO_PREFIX, KEY_FILE, PROJECT_ID
 from recordings import recording_name
+
+SAMPLE_RATE = 16000
 
 
 def pick_file():
@@ -24,24 +26,39 @@ def pick_file():
 
 
 def chunk_audio(record_path, chunk_dir=CHUNK_DIR, chunk_seconds=CHUNK_SECONDS):
-    """Split a recording into PCM WAV chunks with ffmpeg; returns the chunk paths.
+    """Split a recording into 16 kHz mono PCM WAV chunks of exactly chunk_seconds; returns the chunk paths.
 
-    Always transcodes to PCM: copying a non-PCM stream (e.g. AAC from a Teams mp4) into .wav gives unreadable files.
+    ffmpeg decodes to raw PCM on a pipe and the chunks are cut here by sample count. ffmpeg's segment
+    muxer cuts at packet boundaries and overshoots by a fraction of a second, and BatchRecognize rejects
+    anything over 20 minutes. Always PCM: copying e.g. AAC from a Teams mp4 into .wav gives unreadable files.
+    16 kHz mono is all speech recognition needs, and is ~6x smaller than 48 kHz stereo.
     """
     base_name = recording_name(record_path)
     os.makedirs(chunk_dir, exist_ok=True)
+    chunk_bytes = chunk_seconds * SAMPLE_RATE * 2  # 16-bit samples
 
     print("Splitting...")
-    subprocess.run([
-        "ffmpeg", "-y", "-i", record_path,
-        "-vn",
-        "-f", "segment",
-        "-segment_time", str(chunk_seconds),
-        "-c:a", "pcm_s16le",
-        os.path.join(chunk_dir, f"{base_name}_chunk_%03d.wav"),
-    ], check=True)
-
-    return sorted(glob.glob(os.path.join(chunk_dir, f"{base_name}_chunk_*.wav")))
+    ffmpeg = subprocess.Popen(
+        ["ffmpeg", "-v", "error", "-i", record_path, "-vn", "-ac", "1", "-ar", str(SAMPLE_RATE),
+         "-f", "s16le", "-acodec", "pcm_s16le", "-"],
+        stdout=subprocess.PIPE,
+    )
+    chunks = []
+    while True:
+        data = ffmpeg.stdout.read(chunk_bytes)
+        if not data:
+            break
+        path = os.path.join(chunk_dir, f"{base_name}_chunk_{len(chunks):03d}.wav")
+        with wave.open(path, "wb") as w:
+            w.setnchannels(1)
+            w.setsampwidth(2)
+            w.setframerate(SAMPLE_RATE)
+            w.writeframes(data)
+        print(f"  {os.path.basename(path)} ({len(data) / 2 / SAMPLE_RATE:.0f}s)", flush=True)
+        chunks.append(path)
+    if ffmpeg.wait() != 0:
+        raise SystemExit(f"ffmpeg failed on {record_path}")
+    return chunks
 
 
 def upload_chunks(chunks):
